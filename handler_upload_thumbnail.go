@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
@@ -28,10 +29,39 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
 	// TODO: implement the upload here
+	maxMemory := int64(10 << 20)
+	r.ParseMultipartForm(maxMemory)
 
-	respondWithJSON(w, http.StatusOK, struct{}{})
+	file, header, _ := r.FormFile("thumbnail")
+	contentType := header.Header.Get("Content-Type")
+	data, e := io.ReadAll(file)
+	if e != nil {
+		respondWithError(w, http.StatusNotAcceptable, "Invalid File", nil)
+	}
+
+	defer file.Close()
+
+	v, err := cfg.db.GetVideo(videoID)
+
+	if v.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "Invalid Owner Prohibited", nil)
+		return
+	}
+
+	videoThumbnails[videoID] = thumbnail{
+		data,
+		contentType,
+	}
+
+	s := fmt.Sprintf("http://localhost:%d/api/thumbnails/%s", 8091, videoID)
+	v.ThumbnailURL = &s
+	if err := cfg.db.UpdateVideo(v); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to updated Video", nil)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, v)
 }
